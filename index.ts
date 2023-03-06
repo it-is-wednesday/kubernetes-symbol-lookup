@@ -11,7 +11,10 @@ function removeQuotes(s: string) {
   return s[0] === '"' ? s.slice(1, -1) : s;
 }
 
-async function resourcesInFile(lines: string[], chartName: string): Promise<Resource[]> {
+async function resourcesInFile(
+  lines: string[],
+  chartName: string
+): Promise<Resource[]> {
   const results: Resource[] = [];
 
   let currentKind = null;
@@ -24,7 +27,10 @@ async function resourcesInFile(lines: string[], chartName: string): Promise<Reso
     if (currentKind && currentName) {
       results.push({
         kind: currentKind,
-        name: removeQuotes(currentName).replace(/{{\s*\.Chart\.Name\s*}}/, chartName),
+        name: removeQuotes(currentName).replace(
+          /{{\s*\.Chart\.Name\s*}}/,
+          chartName
+        ),
       });
 
       currentKind = null;
@@ -63,11 +69,18 @@ async function deepReadDir(dirPath: string): Promise<string[]> {
   const baseDir = "/home/crobar/dev/copypastot/chart";
 
   // find chart name
-  const chartYaml = (await readFile(baseDir + "/Chart.yaml")).toString().match("\nname: (.*?)\n")![1];
+  const chartYaml = (await readFile(baseDir + "/Chart.yaml"))
+    .toString()
+    .match("\nname: (.*?)\n")![1];
 
   const files = await deepReadDir(baseDir);
   for (const f of files) {
     const content = (await readFile(f)).toString().split("\n");
-    (await resourcesInFile(content, chartYaml)).forEach((x) => console.log(x));
+    (await resourcesInFile(content, chartYaml)).forEach((x) =>
+      console.log(JSON.stringify({
+        ...x,
+        file: f
+      }))
+    );
   }
 })();
