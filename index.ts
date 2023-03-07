@@ -1,10 +1,12 @@
-import { Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 type Resource = {
   kind: string;
   name: string;
+  lineNum: number;
+  filePath: string;
 };
 
 function removeQuotes(s: string) {
@@ -12,31 +14,30 @@ function removeQuotes(s: string) {
 }
 
 async function resourcesInFile(
-  lines: string[],
+  file: Buffer,
   chartName: string
-): Promise<Resource[]> {
-  const results: Resource[] = [];
+): Promise<Omit<Resource, "filePath">[]> {
+  const lines = file.toString().split("\n");
+  const results: Omit<Resource, "filePath">[] = [];
 
-  let currentKind = null;
-  let currentName = null;
+  let kind: string | null = null;
+  let name: string | null = null;
 
-  for await (const line of lines) {
-    if (line.startsWith("kind: ")) currentKind = line.slice(6);
-    if (line.startsWith("  name: ")) currentName = line.slice(8);
+  lines.forEach(async (line, lineNum) => {
+    if (line.startsWith("kind: ")) kind = line.slice(6);
+    if (line.startsWith("  name: ")) name = line.slice(8);
 
-    if (currentKind && currentName) {
+    if (kind && name) {
       results.push({
-        kind: currentKind,
-        name: removeQuotes(currentName).replace(
-          /{{\s*\.Chart\.Name\s*}}/,
-          chartName
-        ),
+        kind: kind,
+        name: removeQuotes(name).replace(/{{\s*\.Chart\.Name\s*}}/, chartName),
+        lineNum,
       });
 
-      currentKind = null;
-      currentName = null;
+      kind = null;
+      name = null;
     }
-  }
+  });
 
   return results;
 }
@@ -65,22 +66,28 @@ async function deepReadDir(dirPath: string): Promise<string[]> {
   return resolved.filter((x): x is string | string[] => x !== null).flat();
 }
 
-(async () => {
+function findChartName(chartYaml: Buffer): string | undefined {
+  const m = chartYaml.toString().match("\nname: (.*?)\n");
+  return m ? m[1] : undefined;
+}
+
+async function main() {
   const baseDir = "/home/crobar/dev/copypastot/chart";
 
   // find chart name
-  const chartYaml = (await readFile(baseDir + "/Chart.yaml"))
-    .toString()
-    .match("\nname: (.*?)\n")![1];
+  const chartYamlPath = baseDir + "/Chart.yaml";
+  const chartName = await readFile(chartYamlPath).then(findChartName);
+  if (!chartName) throw Error(`No 'name' field in ${chartYamlPath}`);
 
-  const files = await deepReadDir(baseDir);
-  for (const f of files) {
-    const content = (await readFile(f)).toString().split("\n");
-    (await resourcesInFile(content, chartYaml)).forEach((x) =>
-      console.log(JSON.stringify({
-        ...x,
-        file: f
-      }))
-    );
+  // gather all resources from all of the files in our chart into an array and
+  // print it
+  const allResources = [];
+  for (const path of await deepReadDir(baseDir)) {
+    const resources = await resourcesInFile(await readFile(path), chartName);
+    const withPath = resources.map((r) => ({ ...r, filePath: path }));
+    allResources.push(...withPath);
   }
-})();
+  console.log(JSON.stringify(allResources))
+}
+
+main();
